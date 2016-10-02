@@ -4,7 +4,7 @@
 from flask import *
 from hashlib import sha256
 from datetime import datetime
-import os, time
+import os, time, json
 from os import getenv
 app = Flask(__name__)
 
@@ -226,6 +226,269 @@ def aboutTorPaste():
 		title = WEBSITE_TITLE,
 		version = VERSION,
 		page = "about"
+	)
+
+# API Routes
+@app.route('/api/v1')
+def apiMain():
+	return Response('TorPaste API ' + VERSION, mimetype='text/plain')
+
+@app.route('/api/v1/status')
+def apiStatus():
+	return Response(
+		json.dumps(
+			{
+				"success": "true",
+				"error": "none",
+				"errorid": "none",
+				"version": VERSION,
+				"status": "enabled",
+				"config": {
+					"max_paste_size_bytes": MAX_PASTE_SIZE,
+					"title": WEBSITE_TITLE
+				}
+			}
+		),
+		mimetype = "application/json"
+	)
+
+@app.route('/api/v1/paste/new', methods=["POST"])
+def apiNewPaste():
+	try:
+		_ = request.form['content']
+	except:
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": "No paste content set",
+					"errorid": "E_EMPTY_PASTE",
+					"paste_id": "none",
+					"paste_link": "none"
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	try:
+		PasteID = str(sha256(request.form['content'].encode('utf-8')).hexdigest())
+	except:
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": "An error occured while handling the paste.",
+					"errorid": "E_PASTE_HANDLING_ERROR",
+					"paste_id": "none",
+					"paste_link": "none"
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	if ( len(request.form['content'].encode('utf-8')) > MAX_PASTE_SIZE ):
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": "The paste sent is too large.",
+					"errorid": "E_PASTE_TOO_LARGE",
+					"paste_id": "none",
+					"paste_link": "none"
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	try:
+		b.newPaste(PasteID, request.form['content'])
+	except b.e.ErrorException as errmsg:
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": errmsg,
+					"errorid": "E_SERVER_ERROR",
+					"paste_id": "none",
+					"paste_link": "none"
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	try:
+		b.updatePasteMetadata(
+			PasteID,
+			{
+				"date": unicode(int(time.time()))
+			}
+		)
+	except b.e.ErrorException as errmsg:
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": errmsg,
+					"errorid": "E_SERVER_ERROR",
+					"paste_id": "none",
+					"paste_link": "none"
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	return Response(
+		json.dumps(
+			{
+				"success": "true",
+				"error": "none",
+				"errorid": "none",
+				"paste_id": PasteID,
+				"paste_link": "/".join(request.url_root.split("/")[0:3]) + "/view/" + PasteID
+			}
+		),
+		mimetype = "application/json"
+	)
+
+@app.route("/api/v1/paste/get/<pasteid>")
+def apiGetPaste(pasteid):
+	if ( not pasteid.isalnum() ):
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": "The Paste ID supplied is invalid.",
+					"errorid": "E_INVALID_PASTE_ID",
+					"paste": {
+						"content": "none",
+						"date_unix": 0,
+						"date_formatted": "none",
+						"size_bytes": 0,
+						"size_formatted": "none"
+					}
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	if ( len(pasteid) < 6 ):
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": "The Paste ID supplied is invalid.",
+					"errorid": "E_INVALID_PASTE_ID",
+					"paste": {
+						"content": "none",
+						"date_unix": 0,
+						"date_formatted": "none",
+						"size_bytes": 0,
+						"size_formatted": "none"
+					}
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	if ( not b.doesPasteExist(pasteid) ):
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": "There is no paste with this Paste ID.",
+					"errorid": "E_NO_PASTE",
+					"paste": {
+						"content": "none",
+						"date_unix": 0,
+						"date_formatted": "none",
+						"size_bytes": 0,
+						"size_formatted": "none"
+					}
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	try:
+		PasteContent = b.getPasteContents(pasteid)
+	except b.e.ErrorException as errmsg:
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": errmsg,
+					"errorid": "E_SERVER_ERROR",
+					"paste": {
+						"content": "none",
+						"date_unix": 0,
+						"date_formatted": "none",
+						"size_bytes": 0,
+						"size_formatted": "none"
+					}
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	try:
+		PasteDate = b.getPasteMetadataValue(pasteid, "date")
+	except b.e.ErrorException as errmsg:
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": errmsg,
+					"errorid": "E_SERVER_ERROR",
+					"paste": {
+						"content": "none",
+						"date_unix": 0,
+						"date_formatted": "none",
+						"size_bytes": 0,
+						"size_formatted": "none"
+					}
+				}
+			),
+			mimetype = "application/json"
+		)
+	except b.e.WarningException as errmsg:
+		return Response(
+			json.dumps(
+				{
+					"success": "false",
+					"error": errmsg,
+					"errorid": "E_SERVER_ERROR",
+					"paste": {
+						"content": "none",
+						"date_unix": 0,
+						"date_formatted": "none",
+						"size_bytes": 0,
+						"size_formatted": "none"
+					}
+				}
+			),
+			mimetype = "application/json"
+		)
+
+	PD = datetime.fromtimestamp(int(PasteDate) + time.altzone + 3600).strftime("%H:%M:%S %d/%m/%Y")
+	PasteSize = len(PasteContent.encode('utf-8'))
+	PS = formatSize(PasteSize)
+
+	return Response(
+		json.dumps(
+			{
+				"success": "true",
+				"error": "none",
+				"errorid": "none",
+				"paste": {
+					"content": PasteContent,
+					"date_unix": int(PasteDate),
+					"date_formatted": PD,
+					"size_bytes": PasteSize,
+					"size_formatted": PS
+				}
+			}
+		),
+		mimetype = "application/json"
 	)
 
 # Functions
